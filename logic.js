@@ -13,17 +13,21 @@ var antSize = 10; // Initial size of ants
 var antGrow = true; // If ants should grow
 var maxAntSize = 10; // Maximum size of ants when grow is active
 
-var numberOfAnts = 50;  // Number of ants
+var numberOfAnts = 20;  // Number of ants
+var limitAnts = 50; // Limit of ants
 var numberOfResources = 200; // Number of resources on the map
 var resourceLifeValue = 5000; // Max Life that ants restore when eating
 var antSpeed = 0.6; // Speed of ants
 
 var lifecycles = 20 * 1000; // Lifetime of ants
-var resourcesforPregnancy = 5; // Number of resources needed for pregnancy
-var limitAnts = 200; // Limit of ants
+var resourcesforPregnancy = 50; // Number of resources needed for pregnancy
 
-var WindEffectOnAnts = 0.1; // percentage of the effect of wind on ants movement
+
+var WindEffectOnAnts = 0.2; // percentage of the effect of wind on ants movement
 var rotationSpeed = 0.01; // Adjust this value for smoother or faster rotation
+
+// activate debug ;ode to see ant actions
+var debugMode = false;
 
 
 var colors=["blue", "red", "yellow", "green", "purple", "orange"];
@@ -60,7 +64,8 @@ function createAnt(x, y, size, speed, collected, color, lifecycles, currentOrien
     lifecycles: lifecycles, // Initialize ant lifecycles
     currentOrientation: currentOrientation, // Initialize current orientation
     targetOrientation: targetOrientation, // Initialize target orientation
-    isSelected: false
+    isSelected: false,
+    targetCoords: null
   };
 }
 
@@ -175,6 +180,20 @@ function drawAnt(ant) {
   var size_v6 = size*6;
 
   var redamount = 0;
+
+  // draw vector 
+  if(ant.targetCoords && debugMode){
+    ctx.strokeStyle = "green";
+    ctx.strokeRect(ant.targetCoords.x-size_v3, ant.targetCoords.y+-size_v3, size_v6, size_v6);
+    ctx.strokeStyle = "red";
+    ctx.strokeRect(ant.x-size_v3, ant.y+-size_v3, size_v6, size_v6);
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(ant.targetCoords.x, ant.targetCoords.y);
+    ctx.stroke();
+  }
+  
   
   
   if(ant.isSelected){
@@ -194,6 +213,13 @@ function drawAnt(ant) {
     ctx.font = "12px Verdana";
     ctx.fillText("Speed: " + (~~(100*ant.speed)/100), x+size_v3+10, y-10);
     ctx.fillText("Collected: " + ant.totalCollected, x+size_v3+10, y+5);
+
+    let state;
+    if(ant.targetCoords){
+      ctx.fillText("State: Finding mate!", x+size_v3+10, y+20);
+    } else {
+      ctx.fillText("State: Gathering Food!", x+size_v3+10, y+20);
+    }
 
     ctx.fillStyle =color;
     ctx.strokeStyle = color;
@@ -341,6 +367,7 @@ function findClosestResource(ant, i) {
   if (closestResource) {
     closestResource.ant = i; 
     ant.distanceToTarget = minDistance;
+    ant.targetCoords = {x: closestResource.x*1, y:closestResource.y*1};
     ant.target = true;   
   }
 
@@ -350,12 +377,18 @@ function findClosestResource(ant, i) {
 function chooseAction(ant, i) {
   // If ant colected enoough resources, move to the closest mate
    if (ant.collected >= resourcesforPregnancy && ant.lifecycles > lifecycles/2) {
-    let closestMate = null;
+    let targetCoords = null;
     let minDistance = Infinity;
+    let ax,ay;
     ants.forEach((a, index) => {
       if (index !== i){
+        if(targetCoords == null){
+          ax =  ~~a.x;
+          ay =  ~~a.y;
+          targetCoords = {x: ax, y: ay};
+        }
         var distance = Math.sqrt((ant.x - a.x) ** 2 + (ant.y - a.y) ** 2);
-        if (distance < ant.size + a.size) {
+        if (distance < ant.size*2) {
           // ant.color = a.color;
           // do not create an ant if there are more than the limit
           if (ants.length < limitAnts){
@@ -375,60 +408,75 @@ function chooseAction(ant, i) {
           ant.collected = 0;
           ant.lifecycles = lifecycles;
           ant.target = false;
-          
+          ant.targetCoords = null;
+
           a.collected = 0;
-          a.lastCollectedTime = lifecycles;
+          a.lifecycles = lifecycles;
           a.target = false;
-          a.targetOrientation = ant.targetOrientation - Math.PI/2;
-              
-          
-          //if ant couldn't find a mate, it will move to the closest mate
-          closestMate = distance < minDistance ? a : closestMate;
-          minDistance = distance < minDistance ? distance : minDistance;
-        }  
+          a.targetCoords = null;
+        }
+
+        //if ant couldn't find a mate, it will move to the closest mate
+        if (distance < minDistance){
+          ax =  ~~a.x;
+          ay =  ~~a.y;
+          minDistance = distance;
+          targetCoords = {x: ax, y: ay};
+        }
       }
     });
-    if (closestMate !== null) {
-      ant.targetOrientation = Math.atan2(closestMate.y - ant.y, closestMate.x - ant.x);
+    
+    if (targetCoords !== null) {
+      ax = ~~targetCoords.x;
+      ay = ~~targetCoords.y;
+      
+      ant.targetCoords = 
+        {
+          x: ax,
+          y: ay
+        };
+      ant.targetOrientation = Math.atan2(ay - ant.y, ax - ant.x);
       ant.target = true;
-      return
+      
+    } else {
+      ant.target = false;
+      ant.targetCoords = null;
+    }
+  } else{
+    ant.targetCoords = null;
+    // Default behaviour - find food
+    var closestResource = findClosestResource(ant, i);
+    if (closestResource !== null) {
+      var distance = Math.sqrt((ant.x - closestResource.x) ** 2 + (ant.y - closestResource.y) ** 2);
+      if (distance < ant.size) {
+        ant.collected += 1;
+        ant.totalCollected += 1;
+        // ant.lifecycles = lifecycles;
+        // ant restores X llife on eating up to max life.
+        ant.lifecycles += resourceLifeValue;
+
+        // prevent that gets more life than possible.
+        if(ant.lifecycles > lifecycles){
+          ant.lifecycles = lifecycles;
+        }
+
+        if (antGrow) {
+          // Change ant size slightly up to size 20
+          // But only increase one size per 10 resources
+          if (ant.collected % 10 === 0 && ant.size < maxAntSize) {
+            ant.size += 1;
+          }
+        }
+        closestResource.collected = true;
+      } else {
+        ant.targetOrientation = Math.atan2(closestResource.y - ant.y, closestResource.x - ant.x);
+        ant.target = true;
+      }
     } else {
       ant.target = false;
     }
   }
   
-  // Default behaviour - find food
-  var closestResource = findClosestResource(ant, i);
-  if (closestResource !== null) {
-    var distance = Math.sqrt((ant.x - closestResource.x) ** 2 + (ant.y - closestResource.y) ** 2);
-    if (distance < ant.size) {
-      ant.collected += 1;
-      ant.totalCollected += 1;
-      // ant.lifecycles = lifecycles;
-      // ant restores X llife on eating up to max life.
-      ant.lifecycles += resourceLifeValue;
-
-      // prevent that gets more life than possible.
-      if(ant.lifecycles > lifecycles){
-        ant.lifecycles = lifecycles;
-      }
-
-
-      if (antGrow) {
-        // Change ant size slightly up to size 20
-        // But only increase one size per 10 resources
-        if (ant.collected % 10 === 0 && ant.size < maxAntSize) {
-          ant.size += 1;
-        }
-      }
-      closestResource.collected = true;
-    } else {
-      ant.targetOrientation = Math.atan2(closestResource.y - ant.y, closestResource.x - ant.x);
-      ant.target = true;
-    }
-  } else {
-    ant.target = false;
-  }
 }
 
 function moveAntWithAI(ant, i) {
